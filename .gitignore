@@ -1,0 +1,26 @@
+# OS artifacts
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+
+# Editor noise
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Archive exports (do not commit build artifacts)
+*.zip
+*.tar.gz
+*.tar
+
+# Session transcripts and temp files
+*.transcript
+*.tmp
+
+# Python cache (CI scripts)
+__pycache__/
+*.pyc
