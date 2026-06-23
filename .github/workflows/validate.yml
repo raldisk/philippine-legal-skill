@@ -1,0 +1,116 @@
+name: Validate Repository
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Required root files present
+        run: |
+          MISSING=0
+          for f in README.md LICENSE .gitignore CONTRIBUTING.md CHANGELOG.md \
+                   SKILL.md architecture.md FINAL-CONTINUATION-PACKET.md \
+                   references-index/routing-table.md references-index/authority-hierarchy.md; do
+            if [ ! -f "$f" ]; then
+              echo "MISSING: $f"
+              MISSING=$((MISSING+1))
+            fi
+          done
+          if [ $MISSING -gt 0 ]; then
+            echo "::error::$MISSING required file(s) missing"
+            exit 1
+          fi
+          echo "Required files: OK"
+
+      - name: No empty markdown files
+        run: |
+          python3 - << 'EOF'
+          import os, sys
+          errors = []
+          for root, dirs, files in os.walk('.'):
+              dirs[:] = [d for d in dirs if not d.startswith('.')]
+              for f in files:
+                  if f.endswith('.md'):
+                      path = os.path.join(root, f)
+                      if os.path.getsize(path) == 0:
+                          errors.append(path)
+          if errors:
+              for e in errors:
+                  print(f"::error file={e}::Empty markdown file")
+              sys.exit(1)
+          print(f"Empty file check: OK ({sum(1 for r,d,fs in os.walk('.') for f in fs if f.endswith('.md'))} .md files checked)")
+          EOF
+
+      - name: Domain folders have routing entries
+        run: |
+          python3 - << 'EOF'
+          import os, sys
+          SKIP = {'references-index', 'exam-tracks', '.github', 'legacy'}
+          routing = open('references-index/routing-table.md').read()
+          domains = [d for d in os.listdir('.')
+                     if os.path.isdir(d) and not d.startswith('.')
+                     and d not in SKIP]
+          missing = [d for d in domains if d.replace('-', '') not in routing.replace('-', '')]
+          if missing:
+              for m in missing:
+                  print(f"::warning::No routing entry found for domain: {m}")
+          print(f"Routing check: {len(domains)-len(missing)}/{len(domains)} domains have entries")
+          EOF
+
+      - name: Stub depth report (warn only)
+        run: |
+          python3 - << 'EOF'
+          import os
+          KNOWN_STUBS = {'environmental-law', 'immigration'}
+          stubs = []
+          for root, dirs, files in os.walk('.'):
+              dirs[:] = [d for d in dirs if not d.startswith('.') and d != 'legacy']
+              for f in files:
+                  if f.endswith('.md'):
+                      path = os.path.join(root, f)
+                      size = os.path.getsize(path)
+                      lines = open(path).read().count('\n')
+                      domain = root.lstrip('./').split('/')[0]
+                      if size < 3000 and lines < 50 and domain not in {'', '.github', 'references-index'}:
+                          stubs.append(f"{path} ({lines} lines, {size} bytes)")
+          if stubs:
+              print(f"::warning::Stub-depth files detected ({len(stubs)}):")
+              for s in stubs:
+                  print(f"  {s}")
+          else:
+              print("Stub depth check: no unexpected stubs")
+          EOF
+
+      - name: Cross-reference integrity (warn on broken module refs)
+        run: |
+          python3 - << 'EOF'
+          import os, re
+          broken = []
+          for root, dirs, files in os.walk('.'):
+              dirs[:] = [d for d in dirs if not d.startswith('.') and d != 'legacy']
+              for f in files:
+                  if f.endswith('.md'):
+                      path = os.path.join(root, f)
+                      content = open(path, encoding='utf-8', errors='replace').read()
+                      # Only check explicit module cross-refs with slash notation
+                      refs = re.findall(r'(?<!\w)([\w-]+/[\w-]+\.md)(?!\w)', content)
+                      for ref in set(refs):
+                          if not os.path.exists(ref):
+                              broken.append(f"{path} -> {ref}")
+          if broken:
+              for b in broken[:20]:
+                  print(f"::warning::Broken ref: {b}")
+              if len(broken) > 20:
+                  print(f"::warning::... and {len(broken)-20} more")
+          else:
+              print("Cross-reference check: OK")
+          EOF
